@@ -49,13 +49,11 @@ The bot is live and hosted on **Railway** 🚂.
 ## 📁 Folder Structure  
 
 ```
-movie-info-bot/
-├── main.py               # Entry point for the bot
-├── handlers/             # Telegram command & message handlers
-├── services/             # APIs to fetch movie/web series info
-├── utils/                # Helper functions
-├── requirements.txt      # Dependencies
-└── README.md             # Project documentation
+├── .env.example
+├── .gitignore
+├── README.md
+├── bot.py
+└── requirements.txt
 ```
 
 ---
