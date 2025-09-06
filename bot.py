@@ -7,7 +7,6 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 
 load_dotenv()
 
-
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TMDB_API_KEY = os.getenv("TMDB_API_KEY")
 
@@ -23,7 +22,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def get_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Fetches and sends movie/series info based on user's message."""
     query = update.message.text
-    await update.message.reply_text(f"Searching for '{query}'...")
+
+    processing_message = await update.message.reply_text(f"Searching for '{query}'...")
 
     search_url = f"https://api.themoviedb.org/3/search/multi?api_key={TMDB_API_KEY}&query={query}"
     
@@ -32,7 +32,9 @@ async def get_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
         response.raise_for_status()
         data = response.json()
 
-        if not data['results']:
+        await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=processing_message.message_id)
+
+        if not data.get('results'):
             await update.message.reply_text("Sorry, I couldn't find anything for that title. Please check the spelling.")
             return
 
@@ -53,20 +55,29 @@ async def get_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
         videos_response = requests.get(videos_url).json()
         trailer_key = None
         for video in videos_response.get('results', []):
-            if video['type'].lower() == 'trailer':
+
+            if video['type'].lower() == 'trailer' and video.get('official', False):
                 trailer_key = video['key']
                 break
+
+        if not trailer_key:
+            for video in videos_response.get('results', []):
+                if video['type'].lower() == 'trailer':
+                    trailer_key = video['key']
+                    break
         
         trailer_link = f"https://www.youtube.com/watch?v={trailer_key}" if trailer_key else "No trailer found."
 
+
         message = (
-            f"🎬 **{title}**\n\n"
-            f"⭐ **Rating:** {rating:.1f}/10\n\n"
-            f"**📝 Overview:**\n{overview}\n\n"
-            f"**▶️ Trailer:** {trailer_link}"
+            f"🎬 {title}\n\n"
+            f"⭐ Rating: {rating:.1f}/10\n\n"
+            f"📝 Overview:\n{overview}\n\n"
+            f"▶️ Trailer: {trailer_link}"
         )
 
-        await update.message.reply_photo(photo=poster_url, caption=message, parse_mode='Markdown')
+
+        await update.message.reply_photo(photo=poster_url, caption=message)
 
     except requests.exceptions.RequestException as e:
         print(f"API Request Error: {e}")
