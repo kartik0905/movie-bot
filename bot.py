@@ -3,6 +3,7 @@ import requests
 from dotenv import load_dotenv  
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from datetime import datetime, timedelta
 
 
 load_dotenv()
@@ -22,13 +23,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def get_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Fetches and sends movie/series info based on user's message."""
     query = update.message.text
-
     processing_message = await update.message.reply_text(f"Searching for '{query}'...")
 
     search_url = f"https://api.themoviedb.org/3/search/multi?api_key={TMDB_API_KEY}&query={query}"
     
     try:
-        response = requests.get(search_url)
+
+        response = requests.get(search_url, timeout=10)
         response.raise_for_status()
         data = response.json()
 
@@ -40,9 +41,6 @@ async def get_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         result = data['results'][0]
         media_type = result.get('media_type')
-        if media_type not in ['movie', 'tv']:
-             await update.message.reply_text("Sorry, I found a result but it's not a movie or TV show.")
-             return
 
         item_id = result.get('id')
         title = result.get('title') or result.get('name')
@@ -52,22 +50,15 @@ async def get_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
         poster_url = f"https://image.tmdb.org/t/p/w500{poster_path}" if poster_path else "https://via.placeholder.com/500x750.png?text=No+Poster"
         
         videos_url = f"https://api.themoviedb.org/3/{media_type}/{item_id}/videos?api_key={TMDB_API_KEY}"
-        videos_response = requests.get(videos_url).json()
+
+        videos_response = requests.get(videos_url, timeout=10).json()
         trailer_key = None
         for video in videos_response.get('results', []):
-
-            if video['type'].lower() == 'trailer' and video.get('official', False):
+            if video['type'].lower() == 'trailer':
                 trailer_key = video['key']
                 break
-
-        if not trailer_key:
-            for video in videos_response.get('results', []):
-                if video['type'].lower() == 'trailer':
-                    trailer_key = video['key']
-                    break
         
         trailer_link = f"https://www.youtube.com/watch?v={trailer_key}" if trailer_key else "No trailer found."
-
 
         message = (
             f"🎬 {title}\n\n"
@@ -76,12 +67,24 @@ async def get_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"▶️ Trailer: {trailer_link}"
         )
 
+        if media_type == 'movie':
+            details_url = f"https://api.themoviedb.org/3/movie/{item_id}?api_key={TMDB_API_KEY}"
+
+            details_response = requests.get(details_url, timeout=10).json()
+            release_date_str = details_response.get('release_date')
+
+            if release_date_str:
+                release_date = datetime.strptime(release_date_str, '%Y-%m-%d').date()
+                today = datetime.now().date()
+                if today - timedelta(days=60) <= release_date <= today:
+                    bms_url = "https://in.bookmyshow.com/explore/movies"
+                    message += f"\n\n🎟️ Book Tickets: {bms_url}"
 
         await update.message.reply_photo(photo=poster_url, caption=message)
 
     except requests.exceptions.RequestException as e:
         print(f"API Request Error: {e}")
-        await update.message.reply_text("Sorry, something went wrong while fetching data. Please try again later.")
+        await update.message.reply_text("Sorry, I'm having trouble connecting to the movie database. Please try again in a moment.")
     except Exception as e:
         print(f"An unexpected error occurred: {e}")
         await update.message.reply_text("An unexpected error occurred. The developer has been notified.")
