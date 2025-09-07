@@ -12,12 +12,26 @@ from sqlalchemy import create_engine, Column, Integer, String, BigInteger, Uniqu
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
 
+
 load_dotenv()
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TMDB_API_KEY = os.getenv("TMDB_API_KEY")
 ADMIN_USER_ID = os.getenv("ADMIN_USER_ID")
+
+
 DATABASE_URL = os.getenv("DATABASE_URL") 
+
+
+if not DATABASE_URL:
+    PGHOST = os.getenv("PGHOST")
+    PGUSER = os.getenv("PGUSER")
+    PGPASSWORD = os.getenv("PGPASSWORD")
+    PGDATABASE = os.getenv("PGDATABASE")
+    PGPORT = os.getenv("PGPORT")
+   
+    if all([PGHOST, PGUSER, PGPASSWORD, PGDATABASE, PGPORT]):
+        DATABASE_URL = f"postgresql://{PGUSER}:{PGPASSWORD}@{PGHOST}:{PGPORT}/{PGDATABASE}"
 
 
 engine = create_engine(DATABASE_URL)
@@ -74,7 +88,10 @@ async def send_media_details(update: Update, context: ContextTypes.DEFAULT_TYPE,
         callback_data = f"details_{media_type}_{item_id}"
         keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("Show Details & Options ➕", callback_data=callback_data)]])
         
-        await update.message.reply_photo(
+
+        message_to_send = update.message or update.callback_query.message
+        
+        await message_to_send.reply_photo(
             photo=poster_url,
             caption=message,
             parse_mode='MarkdownV2',
@@ -84,6 +101,8 @@ async def send_media_details(update: Update, context: ContextTypes.DEFAULT_TYPE,
     except Exception as e:
         print(f"Error in send_media_details: {e}")
         await update.message.reply_text("An error occurred while fetching details.")
+
+
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Sends a welcome message."""
@@ -286,12 +305,43 @@ async def watchlist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(message, parse_mode='MarkdownV2')
         
 async def usage(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    await update.message.reply_text("Usage stats would be displayed here.")
-    
+    user_id = str(update.effective_user.id)
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("Sorry, this command is for the bot admin only.")
+        return
+    try:
+        if not os.path.exists(USAGE_LOG_FILE):
+            await update.message.reply_text("No usage data has been recorded yet.")
+            return
+        with open(USAGE_LOG_FILE, 'r', encoding='utf-8') as f:
+            logs = json.load(f)
+        total_requests = len(logs)
+        unique_users = len(set(log['user_id'] for log in logs))
+        last_24_hours_requests = 0
+        one_day_ago = datetime.now() - timedelta(days=1)
+        for log in logs:
+            log_time = datetime.fromisoformat(log['timestamp'])
+            if log_time > one_day_ago:
+                last_24_hours_requests += 1
+        stats_message = (
+            f"*📊 Bot Usage Statistics*\n\n"
+            f"\\- *Total Requests:* {total_requests}\n"
+            f"\\- *Unique Users:* {unique_users}\n"
+            f"\\- *Requests in Last 24h:* {last_24_hours_requests}"
+        )
+        await update.message.reply_text(stats_message, parse_mode='MarkdownV2')
+    except Exception as e:
+        print(f"Error in /usage command: {e}")
+        
 async def privacy(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    await update.message.reply_text("Privacy policy would be displayed here.")
+    policy_text = (
+        "*Privacy Policy for CineFile Bot*\n\n"
+        "*Data We Receive:*\nWe only process the movie title you send and your Telegram User/Chat ID to reply to you\.\n\n"
+        "*How We Use It:*\nYour search is sent to TMDb to fetch movie details\. Your ID is used only to send the message back\.\n\n"
+        "*Data Storage:*\n**We do not store your personal data**\. Your searches and watchlist are processed in real\-time\. Your watchlist is stored in a secure database, linked only to your anonymous User ID\.\n\n"
+        "*Contact:*\nFor questions, contact @YourTelegramUsername\."
+    )
+    await update.message.reply_text(policy_text, parse_mode='MarkdownV2')
 
 def main():
     """Starts the bot."""
@@ -306,7 +356,11 @@ def main():
     application.add_handler(CommandHandler("actor", actor_command))
     application.add_handler(CommandHandler("watchlist", watchlist_command))
     application.add_handler(CommandHandler("privacy", privacy))
+    
+
     application.add_handler(CallbackQueryHandler(button_handler))
+
+
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, get_info))
 
     print("Bot is running...")
