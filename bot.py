@@ -98,7 +98,7 @@ async def send_media_details(update: Update, context: ContextTypes.DEFAULT_TYPE,
         print(f"Error in send_media_details: {e}")
         await update.message.reply_text("An error occurred while fetching details.")
 
-# --- Bot Command Handlers ---
+
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Sends a welcome message."""
@@ -349,7 +349,7 @@ async def privacy(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "*Data We Receive:*\nWe only process the movie title you send and your Telegram User/Chat ID to reply to you\.\n\n"
         "*How We Use It:*\nYour search is sent to TMDb to fetch movie details\. Your ID is used only to send the message back\.\n\n"
         "*Data Storage:*\n**We do not store your personal data**\. Your searches are processed in real\-time\. Your watchlist is stored in a secure database, linked only to your anonymous User ID\.\n\n"
-        "*Contact:*\nFor questions, contact @YourTelegramUsername\."
+        "*Contact:*\nFor questions, contact @kartik0905\."
     )
     await update.message.reply_text(policy_text, parse_mode='MarkdownV2')
 
