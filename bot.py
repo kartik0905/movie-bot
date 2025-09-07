@@ -48,7 +48,6 @@ class WatchlistItem(Base):
 Base.metadata.create_all(engine)
 Session = sessionmaker(bind=engine)
 
-
 USAGE_LOG_FILE = 'usage_log.json'
 
 def log_usage(user_id: int, query: str):
@@ -174,26 +173,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if media_type == 'tv':
                 seasons = details_response.get('number_of_seasons')
                 episodes = details_response.get('number_of_episodes')
-                full_message += f"📺 *Seasons:* {seasons}  |  *Episodes:* {episodes}\n\n"
+
+                full_message += f"📺 *Seasons:* {seasons}  \\|  *Episodes:* {episodes}\n\n"
 
             full_message += f"📝 *Overview:*\n{escaped_overview}"
-            
-            keyboard_buttons = []
-            trailer_key = next((v['key'] for v in details_response.get('videos', {}).get('results', []) if v['type'].lower() == 'trailer'), None)
-            if trailer_key:
-                keyboard_buttons.append(InlineKeyboardButton("▶️ Watch Trailer", url=f"https://www.youtube.com/watch?v={trailer_key}"))
-            
-            if media_type == 'movie':
-                release_date_str = details_response.get('release_date')
-                if release_date_str:
-                    release_date = datetime.strptime(release_date_str, '%Y-%m-%d').date()
-                    if datetime.now().date() - timedelta(days=60) <= release_date:
-                        keyboard_buttons.append(InlineKeyboardButton("🎟️ Book Tickets", url="https://in.bookmyshow.com/explore/movies"))
-
-            keyboard_buttons.append(InlineKeyboardButton("Add to Watchlist ➕", callback_data=f"add_{media_type}_{item_id}"))
-            
-            reply_markup = InlineKeyboardMarkup([keyboard_buttons])
-            await query.edit_message_caption(caption=full_message, parse_mode='MarkdownV2', reply_markup=reply_markup)
 
         except Exception as e:
             print(f"Error in button_handler (details): {e}")
