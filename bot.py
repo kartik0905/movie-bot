@@ -18,7 +18,7 @@ load_dotenv()
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TMDB_API_KEY = os.getenv("TMDB_API_KEY")
 ADMIN_USER_ID = os.getenv("ADMIN_USER_ID")
-DATABASE_URL = os.getenv("DATABASE_URL")
+DATABASE_URL = os.getenv("DATABASE_URL") 
 
 
 if not DATABASE_URL:
@@ -98,7 +98,7 @@ async def send_media_details(update: Update, context: ContextTypes.DEFAULT_TYPE,
         print(f"Error in send_media_details: {e}")
         await update.message.reply_text("An error occurred while fetching details.")
 
-
+# --- Bot Command Handlers ---
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Sends a welcome message."""
@@ -135,23 +135,16 @@ async def get_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Parses the CallbackQuery and updates the message text with full details."""
-    print("--- Button Handler Triggered! ---")
-    
     query = update.callback_query
     await query.answer()
 
     data = query.data
-    print(f"Received callback data: {data}")
+    action, media_type, item_id_str = data.split('_')
+    item_id = int(item_id_str)
+    user_id = query.from_user.id
 
-    try:
-        action, media_type, item_id_str = data.split('_')
-        item_id = int(item_id_str)
-        user_id = query.from_user.id
-        
-        print(f"Action: {action}, Media Type: {media_type}, Item ID: {item_id}")
-
-        if action == "details":
-            print("Action is 'details'. Fetching full info...") 
+    if action == "details":
+        try:
             details_url = f"https://api.themoviedb.org/3/{media_type}/{item_id}?api_key={TMDB_API_KEY}&append_to_response=videos"
             details_response = requests.get(details_url, timeout=10).json()
 
@@ -192,31 +185,48 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     release_date = datetime.strptime(release_date_str, '%Y-%m-%d').date()
                     if datetime.now().date() - timedelta(days=60) <= release_date:
                         keyboard_buttons.append(InlineKeyboardButton("🎟️ Book Tickets", url="https://in.bookmyshow.com/explore/movies"))
-
-            keyboard_buttons.append(InlineKeyboardButton("Add to Watchlist ➕", callback_data=f"add_{media_type}_{item_id}"))
             
-            reply_markup = InlineKeyboardMarkup([keyboard_buttons])
-            
-            print("Attempting to edit message...") 
-            await query.edit_message_caption(caption=full_message, parse_mode='MarkdownV2', reply_markup=reply_markup)
-            print("Message edited successfully!") 
-
-        elif action == "add":
-            print("Action is 'add'. Adding to watchlist...") 
             session = Session()
             exists = session.query(WatchlistItem).filter_by(user_id=user_id, media_type=media_type, media_id=item_id).first()
+            session.close()
+
             if exists:
-                await query.answer("This item is already on your watchlist!", show_alert=True)
+                keyboard_buttons.append(InlineKeyboardButton("✅ Added to Watchlist", callback_data="noop_0_0"))
             else:
+                keyboard_buttons.append(InlineKeyboardButton("Add to Watchlist ➕", callback_data=f"add_{media_type}_{item_id}"))
+
+            reply_markup = InlineKeyboardMarkup([keyboard_buttons])
+            await query.edit_message_caption(caption=full_message, parse_mode='MarkdownV2', reply_markup=reply_markup)
+
+        except Exception as e:
+            print(f"Error in button_handler (details): {e}")
+
+    elif action == "add":
+        try:
+            session = Session()
+            exists = session.query(WatchlistItem).filter_by(user_id=user_id, media_type=media_type, media_id=item_id).first()
+            
+            if not exists:
                 new_item = WatchlistItem(user_id=user_id, media_type=media_type, media_id=item_id)
                 session.add(new_item)
                 session.commit()
-                await query.answer("✅ Added to your watchlist!", show_alert=True)
+            
             session.close()
-            print("Item added (or already exists).") 
 
-    except Exception as e:
-        print(f"---!!! CRITICAL ERROR in button_handler: {e} !!!---")
+            original_keyboard = query.message.reply_markup.inline_keyboard
+            new_keyboard_buttons = []
+
+            for button in original_keyboard[0]:
+                if not button.callback_data.startswith("add_"):
+                    new_keyboard_buttons.append(button)
+            
+            new_keyboard_buttons.append(InlineKeyboardButton("✅ Added to Watchlist", callback_data="noop_0_0"))
+
+            reply_markup = InlineKeyboardMarkup([new_keyboard_buttons])
+            await query.edit_message_reply_markup(reply_markup=reply_markup)
+
+        except Exception as e:
+            print(f"Error in button_handler (add): {e}")
 
 async def popular_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Fetching the most popular movies right now...")
@@ -252,7 +262,7 @@ async def suggest_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def actor_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     actor_name = ' '.join(context.args)
     if not actor_name:
-        await update.message.reply_text("Please provide an actor's name. Example: /actor Tom Hanks")
+        await update.message.reply_text("Please provide an actor's name\. Example: /actor Tom Hanks")
         return
     await update.message.reply_text(f"Searching for {actor_name}...")
     try:
@@ -285,7 +295,6 @@ async def actor_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         print(f"Error in /actor command: {e}")
 
 async def watchlist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Displays the user's personal watchlist."""
     user_id = update.effective_user.id
     session = Session()
     user_watchlist = session.query(WatchlistItem).filter_by(user_id=user_id).all()
@@ -336,10 +345,10 @@ async def usage(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
 async def privacy(update: Update, context: ContextTypes.DEFAULT_TYPE):
     policy_text = (
-        "*Privacy Policy for CineFile Bot*\n\n"
+        "*Privacy Policy for Your Bot*\n\n"
         "*Data We Receive:*\nWe only process the movie title you send and your Telegram User/Chat ID to reply to you\.\n\n"
         "*How We Use It:*\nYour search is sent to TMDb to fetch movie details\. Your ID is used only to send the message back\.\n\n"
-        "*Data Storage:*\n**We do not store your personal data**\. Your searches and watchlist are processed in real\-time\. Your watchlist is stored in a secure database, linked only to your anonymous User ID\.\n\n"
+        "*Data Storage:*\n**We do not store your personal data**\. Your searches are processed in real\-time\. Your watchlist is stored in a secure database, linked only to your anonymous User ID\.\n\n"
         "*Contact:*\nFor questions, contact @YourTelegramUsername\."
     )
     await update.message.reply_text(policy_text, parse_mode='MarkdownV2')
