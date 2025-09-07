@@ -1,7 +1,7 @@
 <div align="center">
 
 # 🎬 Movie Info Fetcher Bot  
-### Get Movie & Web Series Info Instantly on Telegram  
+### Get Movie, TV Show & Web Series Info Instantly on Telegram  
 
 [👉 Try it Live](https://t.me/MyMovieInfoFetcherbot)
 
@@ -18,9 +18,11 @@
 
 ## 📌 Overview  
 
-**Movie Info Fetcher Bot** is a **Telegram bot** that lets you quickly search for **movies and web series info** right inside Telegram.  
+**Movie Info Fetcher Bot** is a **Telegram bot** that lets you quickly search for **movies, TV shows, and web series info** right inside Telegram.  
 
 If the movie is currently running in **theatres**, it even provides a **BookMyShow link** to book tickets instantly.  
+
+It also supports a **watchlist feature** so you can save movies and shows for later.  
 
 The bot is live and hosted on **Railway** 🚂.  
 
@@ -28,8 +30,11 @@ The bot is live and hosted on **Railway** 🚂.
 
 ## ✨ Features  
 
-- 🔍 **Search Movies & Web Series** — Get detailed info in seconds  
+- 🔍 **Search Movies, TV Shows & Web Series** — Get detailed info in seconds (with seasons & episodes for TV shows)  
 - 🎟️ **Theatre Movies** — Direct **BookMyShow link** to book tickets  
+- 📌 **Watchlist** — Add movies/shows and view them anytime with `/watchlist`  
+- ✅ **Smart Buttons** — Clear confirmation when items are added to watchlist  
+- 🔒 **Commands & Privacy** — Full command list and `/privacy` policy included  
 - ⚡ **Instant & Lightweight** — Works directly in Telegram  
 - ☁️ **Hosted on Railway** — Always online & fast  
 
@@ -41,6 +46,7 @@ The bot is live and hosted on **Railway** 🚂.
 |-------|--------------|---------|
 | **Bot Framework** | [Telegram Bot API](https://core.telegram.org/bots) | Telegram integration |
 | **Backend** | Python | Core logic |
+| **Database** | PostgreSQL on Railway | Persistent watchlist storage |
 | **Hosting** | Railway | Deployment & uptime |
 | **Integration** | BookMyShow | Theatre ticket booking link |
 
@@ -49,11 +55,14 @@ The bot is live and hosted on **Railway** 🚂.
 ## 📁 Folder Structure  
 
 ```
-├── .env.example
-├── .gitignore
-├── README.md
-├── bot.py
-└── requirements.txt
+movie-info-bot/
+├── main.py               # Entry point for the bot
+├── handlers/             # Telegram command & message handlers
+├── services/             # APIs to fetch movie/web series info
+├── database/             # PostgreSQL integration for watchlist
+├── utils/                # Helper functions
+├── requirements.txt      # Dependencies
+└── README.md             # Project documentation
 ```
 
 ---
@@ -64,6 +73,7 @@ The bot is live and hosted on **Railway** 🚂.
 
 - Python **3.9+**  
 - Telegram Bot Token (from [BotFather](https://t.me/BotFather))  
+- PostgreSQL database (on Railway or local)  
 
 ---
 
@@ -88,6 +98,7 @@ Create a `.env` file:
 
 ```bash
 BOT_TOKEN=your_telegram_bot_token
+DATABASE_URL=your_postgres_database_url
 ```
 
 ### 4. Run the Bot  
@@ -117,6 +128,7 @@ railway up
 - `python-telegram-bot`  
 - `requests`  
 - `python-dotenv`  
+- `psycopg2`  
 
 ---
 
