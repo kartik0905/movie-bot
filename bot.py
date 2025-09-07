@@ -18,9 +18,7 @@ load_dotenv()
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TMDB_API_KEY = os.getenv("TMDB_API_KEY")
 ADMIN_USER_ID = os.getenv("ADMIN_USER_ID")
-
-
-DATABASE_URL = os.getenv("DATABASE_URL") 
+DATABASE_URL = os.getenv("DATABASE_URL")
 
 
 if not DATABASE_URL:
@@ -29,7 +27,6 @@ if not DATABASE_URL:
     PGPASSWORD = os.getenv("PGPASSWORD")
     PGDATABASE = os.getenv("PGDATABASE")
     PGPORT = os.getenv("PGPORT")
-   
     if all([PGHOST, PGUSER, PGPASSWORD, PGDATABASE, PGPORT]):
         DATABASE_URL = f"postgresql://{PGUSER}:{PGPASSWORD}@{PGHOST}:{PGPORT}/{PGDATABASE}"
 
@@ -47,6 +44,7 @@ class WatchlistItem(Base):
 
 Base.metadata.create_all(engine)
 Session = sessionmaker(bind=engine)
+
 
 USAGE_LOG_FILE = 'usage_log.json'
 
@@ -87,7 +85,6 @@ async def send_media_details(update: Update, context: ContextTypes.DEFAULT_TYPE,
         callback_data = f"details_{media_type}_{item_id}"
         keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("Show Details & Options ➕", callback_data=callback_data)]])
         
-
         message_to_send = update.message or update.callback_query.message
         
         await message_to_send.reply_photo(
@@ -138,16 +135,23 @@ async def get_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Parses the CallbackQuery and updates the message text with full details."""
+    print("--- Button Handler Triggered! ---")
+    
     query = update.callback_query
     await query.answer()
 
     data = query.data
-    action, media_type, item_id_str = data.split('_')
-    item_id = int(item_id_str)
-    user_id = query.from_user.id
+    print(f"Received callback data: {data}")
 
-    if action == "details":
-        try:
+    try:
+        action, media_type, item_id_str = data.split('_')
+        item_id = int(item_id_str)
+        user_id = query.from_user.id
+        
+        print(f"Action: {action}, Media Type: {media_type}, Item ID: {item_id}")
+
+        if action == "details":
+            print("Action is 'details'. Fetching full info...") 
             details_url = f"https://api.themoviedb.org/3/{media_type}/{item_id}?api_key={TMDB_API_KEY}&append_to_response=videos"
             details_response = requests.get(details_url, timeout=10).json()
 
@@ -173,19 +177,34 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if media_type == 'tv':
                 seasons = details_response.get('number_of_seasons')
                 episodes = details_response.get('number_of_episodes')
-
                 full_message += f"📺 *Seasons:* {seasons}  \\|  *Episodes:* {episodes}\n\n"
 
             full_message += f"📝 *Overview:*\n{escaped_overview}"
+            
+            keyboard_buttons = []
+            trailer_key = next((v['key'] for v in details_response.get('videos', {}).get('results', []) if v['type'].lower() == 'trailer'), None)
+            if trailer_key:
+                keyboard_buttons.append(InlineKeyboardButton("▶️ Watch Trailer", url=f"https://www.youtube.com/watch?v={trailer_key}"))
+            
+            if media_type == 'movie':
+                release_date_str = details_response.get('release_date')
+                if release_date_str:
+                    release_date = datetime.strptime(release_date_str, '%Y-%m-%d').date()
+                    if datetime.now().date() - timedelta(days=60) <= release_date:
+                        keyboard_buttons.append(InlineKeyboardButton("🎟️ Book Tickets", url="https://in.bookmyshow.com/explore/movies"))
 
-        except Exception as e:
-            print(f"Error in button_handler (details): {e}")
+            keyboard_buttons.append(InlineKeyboardButton("Add to Watchlist ➕", callback_data=f"add_{media_type}_{item_id}"))
+            
+            reply_markup = InlineKeyboardMarkup([keyboard_buttons])
+            
+            print("Attempting to edit message...") 
+            await query.edit_message_caption(caption=full_message, parse_mode='MarkdownV2', reply_markup=reply_markup)
+            print("Message edited successfully!") 
 
-    elif action == "add":
-        try:
+        elif action == "add":
+            print("Action is 'add'. Adding to watchlist...") 
             session = Session()
             exists = session.query(WatchlistItem).filter_by(user_id=user_id, media_type=media_type, media_id=item_id).first()
-            
             if exists:
                 await query.answer("This item is already on your watchlist!", show_alert=True)
             else:
@@ -193,12 +212,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 session.add(new_item)
                 session.commit()
                 await query.answer("✅ Added to your watchlist!", show_alert=True)
-            
             session.close()
+            print("Item added (or already exists).") 
 
-        except Exception as e:
-            print(f"Error in button_handler (add): {e}")
-            await query.answer("Error: Could not add to watchlist.", show_alert=True)
+    except Exception as e:
+        print(f"---!!! CRITICAL ERROR in button_handler: {e} !!!---")
 
 async def popular_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Fetching the most popular movies right now...")
