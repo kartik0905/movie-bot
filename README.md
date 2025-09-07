@@ -73,7 +73,10 @@ movie-info-bot/
 
 - Python **3.9+**  
 - Telegram Bot Token (from [BotFather](https://t.me/BotFather))  
-- PostgreSQL database (on Railway or local)  
+- PostgreSQL database (on Railway or local) 
+
+
+https://github.com/user-attachments/assets/966ebbe8-bcd7-4d98-9262-4588d17c21d6
 
 ---
 
