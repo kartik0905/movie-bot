@@ -2,21 +2,37 @@ import os
 import requests
 import json
 import random
-import uuid
 from datetime import datetime, timedelta
 from dotenv import load_dotenv  
-from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, InlineQueryResultArticle, InputTextMessageContent
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler, InlineQueryHandler
+from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
 from telegram.helpers import escape_markdown
 from urllib.parse import quote_plus
-
+from sqlalchemy import create_engine, Column, Integer, String, BigInteger, UniqueConstraint
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.ext.declarative import declarative_base
 
 load_dotenv()
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TMDB_API_KEY = os.getenv("TMDB_API_KEY")
 ADMIN_USER_ID = os.getenv("ADMIN_USER_ID")
-OMDB_API_KEY = os.getenv("OMDB_API_KEY") 
+DATABASE_URL = os.getenv("DATABASE_URL") 
+
+
+engine = create_engine(DATABASE_URL)
+Base = declarative_base()
+
+class WatchlistItem(Base):
+    __tablename__ = 'watchlist'
+    id = Column(Integer, primary_key=True)
+    user_id = Column(BigInteger, nullable=False)
+    media_type = Column(String, nullable=False)
+    media_id = Column(Integer, nullable=False)
+    __table_args__ = (UniqueConstraint('user_id', 'media_type', 'media_id', name='_user_media_uc'),)
+
+Base.metadata.create_all(engine)
+Session = sessionmaker(bind=engine)
 
 
 USAGE_LOG_FILE = 'usage_log.json'
@@ -49,23 +65,14 @@ async def send_media_details(update: Update, context: ContextTypes.DEFAULT_TYPE,
         details_response = requests.get(details_url, timeout=10).json()
 
         title = details_response.get('title') or details_response.get('name')
-        overview = details_response.get('overview', 'No overview available.')
         poster_path = details_response.get('poster_path')
         poster_url = f"https://image.tmdb.org/t/p/w500{poster_path}" if poster_path else "https://via.placeholder.com/500x750.png?text=No+Poster"
         
-
         escaped_title = escape_markdown(title, version=2)
-        escaped_overview = escape_markdown(overview[:150] + '...', version=2)
+        message = f"🎬 *{escaped_title}*"
 
-        message = (
-            f"🎬 *{escaped_title}*\n\n"
-            f"📝 *Overview:*\n{escaped_overview}"
-        )
-
-        callback_data = f"moreinfo_{media_type}_{item_id}"
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("Show More Info ➕", callback_data=callback_data)]
-        ])
+        callback_data = f"details_{media_type}_{item_id}"
+        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("Show Details & Options ➕", callback_data=callback_data)]])
         
         await update.message.reply_photo(
             photo=poster_url,
@@ -78,13 +85,11 @@ async def send_media_details(update: Update, context: ContextTypes.DEFAULT_TYPE,
         print(f"Error in send_media_details: {e}")
         await update.message.reply_text("An error occurred while fetching details.")
 
-
-
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Sends a welcome message."""
     await update.message.reply_text(
-        "Hello! I'm your movie bot. 🍿\n"
-        "Send a movie name for details, or try /popular, /suggest, or /actor."
+        "Hello\! I'm your movie bot\. 🍿\n"
+        "Send a movie name for details, or try /popular, /suggest, or /actor\."
     )
 
 async def get_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -94,7 +99,7 @@ async def get_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     processing_message = await update.message.reply_text(f"Searching for '{query}'...")
 
     try:
-        search_url = f"https://api.themoviedb.org/3/search/multi?api_key={TMDB_API_KEY}&query={query}"
+        search_url = f"https://api.themoviedb.org/3/search/multi?api_key={TMDB_API_KEY}&query={quote_plus(query)}"
         response = requests.get(search_url, timeout=10)
         response.raise_for_status()
         data = response.json()
@@ -114,78 +119,84 @@ async def get_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("An error occurred while searching.")
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Parses the CallbackQuery and updates the message text."""
+    """Parses the CallbackQuery and updates the message text with full details."""
     query = update.callback_query
     await query.answer()
 
     data = query.data
     action, media_type, item_id_str = data.split('_')
     item_id = int(item_id_str)
+    user_id = query.from_user.id
 
-    if action == "moreinfo":
+    if action == "details":
         try:
             details_url = f"https://api.themoviedb.org/3/{media_type}/{item_id}?api_key={TMDB_API_KEY}&append_to_response=videos"
             details_response = requests.get(details_url, timeout=10).json()
 
-            imdb_id = details_response.get('imdb_id')
             title = details_response.get('title') or details_response.get('name')
             overview = details_response.get('overview', 'No overview available.')
             genres = ', '.join([genre['name'] for genre in details_response.get('genres', [])])
             status = details_response.get('status', 'N/A')
+            rating = details_response.get('vote_average', 0)
             
-            trailer_key = next((video['key'] for video in details_response.get('videos', {}).get('results', []) if video['type'].lower() == 'trailer'), None)
-            trailer_url = f"https://www.youtube.com/watch?v={trailer_key}" if trailer_key else None
-            
-
-            imdb_rating, rt_rating = "N/A", "N/A"
-            if imdb_id and OMDB_API_KEY:
-                omdb_url = f"http://www.omdbapi.com/?i={imdb_id}&apikey={OMDB_API_KEY}"
-                omdb_data = requests.get(omdb_url, timeout=10).json()
-                if omdb_data.get("Response") == "True":
-                    imdb_rating = omdb_data.get("imdbRating", "N/A")
-                    rt_rating = next((r['Value'] for r in omdb_data.get("Ratings", []) if r["Source"] == "Rotten Tomatoes"), "N/A")
-
-
             escaped_title = escape_markdown(title, version=2)
             escaped_overview = escape_markdown(overview, version=2)
             escaped_genres = escape_markdown(genres, version=2)
             escaped_status = escape_markdown(status, version=2)
-            escaped_imdb = escape_markdown(imdb_rating, version=2)
-            escaped_rt = escape_markdown(rt_rating, version=2)
-            
-            imdb_url = f"https://www.imdb.com/title/{imdb_id}/" if imdb_id else "https://www.imdb.com"
-            rt_search_url = f"https://www.rottentomatoes.com/search?search={quote_plus(title)}"
+            escaped_rating = escape_markdown(f"{rating:.1f}/10", version=2)
 
             full_message = (
                 f"🎬 *{escaped_title}*\n\n"
-                f"⭐ [IMDb: {escaped_imdb}/10]({imdb_url})\n"
-                f"🍅 [Rotten Tomatoes: {escaped_rt}]({rt_search_url})\n\n"
+                f"⭐ *Rating:* {escaped_rating} \\(TMDb\\)\n\n"
                 f"🎭 *Genre:* {escaped_genres}\n"
                 f"📊 *Status:* {escaped_status}\n\n"
-                f"📝 *Overview:*\n{escaped_overview}"
             )
             
+            if media_type == 'tv':
+                seasons = details_response.get('number_of_seasons')
+                episodes = details_response.get('number_of_episodes')
+                full_message += f"📺 *Seasons:* {seasons}  |  *Episodes:* {episodes}\n\n"
 
-            keyboard_buttons = []
-            if trailer_url:
-                keyboard_buttons.append(InlineKeyboardButton("▶️ Watch Trailer", url=trailer_url))
+            full_message += f"📝 *Overview:*\n{escaped_overview}"
             
-
+            keyboard_buttons = []
+            trailer_key = next((v['key'] for v in details_response.get('videos', {}).get('results', []) if v['type'].lower() == 'trailer'), None)
+            if trailer_key:
+                keyboard_buttons.append(InlineKeyboardButton("▶️ Watch Trailer", url=f"https://www.youtube.com/watch?v={trailer_key}"))
+            
             if media_type == 'movie':
                 release_date_str = details_response.get('release_date')
                 if release_date_str:
                     release_date = datetime.strptime(release_date_str, '%Y-%m-%d').date()
-                    today = datetime.now().date()
-                    if today - timedelta(days=60) <= release_date <= today:
+                    if datetime.now().date() - timedelta(days=60) <= release_date:
                         keyboard_buttons.append(InlineKeyboardButton("🎟️ Book Tickets", url="https://in.bookmyshow.com/explore/movies"))
+
+            keyboard_buttons.append(InlineKeyboardButton("Add to Watchlist ➕", callback_data=f"add_{media_type}_{item_id}"))
             
-            reply_markup = InlineKeyboardMarkup([keyboard_buttons]) if keyboard_buttons else None
-            
+            reply_markup = InlineKeyboardMarkup([keyboard_buttons])
             await query.edit_message_caption(caption=full_message, parse_mode='MarkdownV2', reply_markup=reply_markup)
 
         except Exception as e:
-            print(f"Error in button_handler: {e}")
-            await query.edit_message_caption(caption="Sorry, an error occurred while fetching more details.")
+            print(f"Error in button_handler (details): {e}")
+
+    elif action == "add":
+        try:
+            session = Session()
+            exists = session.query(WatchlistItem).filter_by(user_id=user_id, media_type=media_type, media_id=item_id).first()
+            
+            if exists:
+                await query.answer("This item is already on your watchlist!", show_alert=True)
+            else:
+                new_item = WatchlistItem(user_id=user_id, media_type=media_type, media_id=item_id)
+                session.add(new_item)
+                session.commit()
+                await query.answer("✅ Added to your watchlist!", show_alert=True)
+            
+            session.close()
+
+        except Exception as e:
+            print(f"Error in button_handler (add): {e}")
+            await query.answer("Error: Could not add to watchlist.", show_alert=True)
 
 async def popular_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Fetching the most popular movies right now...")
@@ -200,7 +211,6 @@ async def popular_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(message, parse_mode='MarkdownV2')
     except Exception as e:
         print(f"Error in /popular command: {e}")
-        await update.message.reply_text("Sorry, an error occurred while fetching popular movies.")
 
 async def suggest_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Finding a great movie for you...")
@@ -214,12 +224,10 @@ async def suggest_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("Couldn't find a suggestion right now, please try again!")
             return
         random_movie = random.choice(response['results'])
-
         await update.message.reply_text("I suggest you watch:")
         await send_media_details(update, context, 'movie', random_movie['id'])
     except Exception as e:
         print(f"Error in /suggest command: {e}")
-        await update.message.reply_text("Sorry, an error occurred while finding a suggestion.")
 
 async def actor_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     actor_name = ' '.join(context.args)
@@ -228,7 +236,7 @@ async def actor_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     await update.message.reply_text(f"Searching for {actor_name}...")
     try:
-        search_url = f"https://api.themoviedb.org/3/search/person?api_key={TMDB_API_KEY}&query={actor_name}"
+        search_url = f"https://api.themoviedb.org/3/search/person?api_key={TMDB_API_KEY}&query={quote_plus(actor_name)}"
         search_response = requests.get(search_url, timeout=10).json()
         if not search_response.get('results'):
             await update.message.reply_text(f"Sorry, I couldn't find an actor named {actor_name}.")
@@ -255,43 +263,35 @@ async def actor_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_photo(photo=photo_url, caption=message, parse_mode='MarkdownV2')
     except Exception as e:
         print(f"Error in /actor command: {e}")
-        await update.message.reply_text("Sorry, an error occurred while searching for the actor.")
-        
-async def usage(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = str(update.effective_user.id)
-    if user_id != ADMIN_USER_ID:
-        await update.message.reply_text("Sorry, this command is for the bot admin only.")
+
+async def watchlist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Displays the user's personal watchlist."""
+    user_id = update.effective_user.id
+    session = Session()
+    user_watchlist = session.query(WatchlistItem).filter_by(user_id=user_id).all()
+    session.close()
+
+    if not user_watchlist:
+        await update.message.reply_text("Your watchlist is empty. Find a movie and use the 'Add to Watchlist' button to save it!")
         return
 
-    await update.message.reply_text("Usage stats would be displayed here.")
+    message = "*📝 Your Watchlist*\n\n"
+    for i, item in enumerate(user_watchlist):
+        details_url = f"https://api.themoviedb.org/3/{item.media_type}/{item.media_id}?api_key={TMDB_API_KEY}"
+        details_response = requests.get(details_url, timeout=10).json()
+        title = details_response.get('title') or details_response.get('name')
+        escaped_title = escape_markdown(title, version=2)
+        message += f"{i+1}\\. {escaped_title}\n"
+        
+    await update.message.reply_text(message, parse_mode='MarkdownV2')
+        
+async def usage(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
-async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.inline_query.query
-    if not query: return
-    results = []
-    try:
-        search_url = f"https://api.themoviedb.org/3/search/multi?api_key={TMDB_API_KEY}&query={query}"
-        response = requests.get(search_url, timeout=5).json()
-        for item in response.get('results', [])[:5]:
-            if item.get('media_type') not in ['movie', 'tv']: continue
-            title = item.get('title') or item.get('name')
-            overview = item.get('overview', 'No overview available.')
-            poster_path = item.get('poster_path')
-            thumb_url = f"https://image.tmdb.org/t/p/w92{poster_path}" if poster_path else ""
-            rating = item.get('vote_average', 0)
-            message_content = (f"🎬 {title}\n⭐ Rating: {rating:.1f}/10\n📝 Overview:\n{overview}")
-            results.append(
-                InlineQueryResultArticle(
-                    id=str(uuid.uuid4()),
-                    title=title,
-                    description=overview[:100] + '...' if overview else 'Click for details',
-                    thumb_url=thumb_url,
-                    input_message_content=InputTextMessageContent(message_content)
-                )
-            )
-    except Exception as e:
-        print(f"Error in inline_query: {e}")
-    await update.inline_query.answer(results, cache_time=5)
+    await update.message.reply_text("Usage stats would be displayed here.")
+    
+async def privacy(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    await update.message.reply_text("Privacy policy would be displayed here.")
 
 def main():
     """Starts the bot."""
@@ -304,12 +304,9 @@ def main():
     application.add_handler(CommandHandler("popular", popular_command))
     application.add_handler(CommandHandler("suggest", suggest_command))
     application.add_handler(CommandHandler("actor", actor_command))
-    
-
+    application.add_handler(CommandHandler("watchlist", watchlist_command))
+    application.add_handler(CommandHandler("privacy", privacy))
     application.add_handler(CallbackQueryHandler(button_handler))
-    application.add_handler(InlineQueryHandler(inline_query))
-
-
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, get_info))
 
     print("Bot is running...")
